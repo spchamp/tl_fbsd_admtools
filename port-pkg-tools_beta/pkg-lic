@@ -1,0 +1,5 @@
+#!/bin/sh
+
+## print package license info
+
+exec pkg query '%L' "$@"

@@ -1,0 +1,38 @@
+#!/bin/sh
+
+REPNAME="$1"
+shift
+
+if [ -z "${REPNAME}" ]; then
+    echo $0: must provide repository name
+    exit 1
+fi
+
+
+#export ASSUME_ALWAYS_YES=yes
+
+# Set IFS to a custom value, to ensure newlines are not
+# collapsed to spaces in varibles
+#if [ -v IFS ]; then ORIG_IFS=${IFS}; else unset ORIG_IFS; fi
+IFS="*"
+
+PKGS_IN=$(pkg query '%n')
+PKGS_AUTO=$(pkg query -e '%a = 1' '%n')
+PKGS=$({ echo ${PKGS_IN} && pkg rquery -r ${REPNAME} '%n'; }  | sort | uniq -d)
+PKGS_REAUTO=$({ echo ${PKGS_AUTO} && echo ${PKGS}; } | sort | uniq -d)
+
+# Update pkgng Repository Information and Re-Install Packages
+
+#export PKGS PKGS_REAUTO
+#su
+
+# Reset IFS
+#if [ -v ORIG_IFS ]; then IFS=${ORIG_IFS}; unset ORIG_IFS; else unset IFS; fi
+unset IFS
+
+pkg update && pkg install -f ${PKGS}
+
+# Ensure 'autoremove' flag is still set on original 'autoremove' packages
+for P in ${PKGS_REAUTO}; do pkg set -A 1 ${P}; done
+
+

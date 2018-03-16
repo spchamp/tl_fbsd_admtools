@@ -1,0 +1,20 @@
+#!/bin/sh
+
+set -e
+
+## e.g usage
+## pkg-list-updated-ports $(pkg-list-manually-installed)
+##
+## NB: NON-OPTIMAL, but no less functional. 
+## Needs to use an efficient, reliable, updatable caching method 
+## onto port metadata
+
+if [ -n "$*" ]; then
+  for SPEC in "$@"; do
+	pkg version -o --ports --like "<" \
+		--match-origin $(pkg query '%o' "${SPEC}")
+  done
+else
+	pkg version -o --ports --like "<"
+fi | awk '{print $1}'
+

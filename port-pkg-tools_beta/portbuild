@@ -1,0 +1,9 @@
+#!/bin/sh
+
+PKG_REPO_ROOT=/var/pkglocal/packages
+
+make config-recursive clean clean-depends build package deinstall reinstall \
+DISABLE_VULNERABILITIES=yes $* && {
+	pkg repo ${PKG_REPO_ROOT};
+	make clean clean-depends;
+}

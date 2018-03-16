@@ -1,0 +1,24 @@
+#!/bin/sh
+
+## NOTE: This script is for interactive application, cf. portsnap(8)
+
+set -e
+
+PORTSNAP_WKDIR="/var/db/portupd/portsnap_wk"
+PORTBASE="/usr/ports"
+
+chkdir() {
+  if ! [ -d "$1" ]; then
+    echo "$(basename $(readlink -f ${0})): Directory does not exist: $1" 1>&2
+    ## cf. sysexits(3)
+    exit 27 # @EX_OSFILE@
+  fi
+}
+
+chkdir "${PORTSNAP_WKDIR}"
+chkdir "${PORTBASE}"
+
+CMD="portsnap -d \"${PORTSNAP_WKDIR}\" -p \"${PORTBASE}\""
+
+${CMD} fetch && exec ${CMD} update
+

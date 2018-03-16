@@ -1,0 +1,14 @@
+#!/bin/sh
+
+## print remote package description for each package denoted 
+## in "$@"
+##
+## default: print all package descriptions, if no specific
+## package denoted
+
+## FIXME Issues
+## * Print error message when no matching package found
+## * Allow for specifying a single repository (getargs?)
+##   so as to avoid printing duplicate descriptions
+
+exec pkg rquery -r FreeBSD '%e' "$@"

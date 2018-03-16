@@ -1,0 +1,254 @@
+#!/bin/sh
+
+set -e
+
+## FIXME perform actual dependency graph traversal,
+## with graph mutation on event of "config update"
+##
+## Tbis "Bare calls to bmake" methodology may not be
+## optimal, but it is functional.
+
+## FIXME: "synth-2.02 has an +IGNOREME file" - AUDITING. also for synth
+## nb portmaster(8)
+## cf. /var/db/pkg/*/+IGNOREME (???)
+## (But no such file exists, on the host)
+
+## FIXME: handling deinstall/install for deleted+merged ports,
+## simply build-new, deinstall-old, install-new with differing
+## in regards to the 'old' and 'new' portS
+
+PKG_REPO_ROOT=/var/pkglocal/packages
+PORTBASE=/usr/ports
+BMAKE_BUILDER_ARGS="DISABLE_VULNERABILITIES=yes ${BMAKE_BUILDER_ARGS}"
+
+NOW=$(date "+%Y-%m-%dT%H:%M%z")
+LOGDIR=${LOGDIR:-${HOME}}
+
+THIS=$(basename $(readlink -f $0))
+
+LOG="${LOGDIR}/${THIS}_${NOW}.scriptlog"
+
+## --
+
+emsg() {
+# echo message
+	echo "-- ${THIS}: $*"
+}
+lmsg() {
+# log message
+	emsg "$@" >> ${LOG}
+}
+elmsg() {
+# print message to echo, log streams
+	emsg "$@"
+	lmsg "$@"
+}
+
+## --
+
+getpdir() {
+  echo ${PORTBASE}/${1}
+  ## NB handle when PDIR does not exist
+}
+trimp() {
+  echo $@ | sed "s|${PORTBASE}/||g"
+}
+
+
+## --
+
+## FIXME portversion not updating '<' for newly built & installed ports !
+## FIXME run pkgdb before portversion (DNW)
+## FIXME pkgdb -L => ERROR
+#
+# FIXME use pkg version -o --ports --like "<" [FIXED]
+# FIXME SKIPARG no longer used externally
+# FIXME reverse deps no longer handled externally
+chkupd() {
+## NB This should be reentrant
+
+local D UP DEP
+
+for J in $@; do
+  UP=$(pkg version -o --ports --like "<" --match-origin "$J")
+  if [ -n "${UP}" ]; then
+#  	D=$(getpdir $J)
+#	DEP=$(make -s -C "$D" describe | cut -d'|' -f11 | trimp)
+	echo $J # $DEP
+  fi	  
+done
+
+
+#done
+#	pkgdb -u -f
+#	portversion -l "<" -R -o ${SKIPARG} $@ | awk  '{print $1}'
+}
+
+## --
+
+## No longer used in this script
+#UPD="--update-if-newer"
+#pmdo() {
+#	script -a "${LOG}" portmaster ${SKIPARG} -R ${UPD} "$@" || exit $?
+#}
+
+
+bmdo() {
+	local P="${1}"
+	shift
+	## NB do place "$@" last, below
+	local ARGS="${BMAKE_BUILDER_ARGS} $@"
+
+	local WHERE=$(getpdir "${P}")
+
+	if [ -z "${WHERE}" ]; then
+	  elmsg "Script error - ${WHERE} does not exist"
+	  exit 42
+	fi
+
+	elmsg "Processing ${P} [${WHERE}] for ${ARGS}"
+	### NB: DO NOT QUOTE 'ARGS' HERE
+	script -a "${LOG}" make -C "${WHERE}" ${ARGS} ||
+          exit $? ## FIXME: Refine this process exit behavior
+
+}
+
+
+bld_one() {
+## NB: Port List Hack
+	local FIRST="${1}"
+	shift
+	elmsg "Build ${FIRST}"
+## NB using policy {dist-install-from-port, pkg-as-dist-backup} on build-host
+	bmdo "${FIRST}" clean clean-depends \
+          build package deinstall reinstall
+}
+
+## NB: Following is produced directly with bmake,
+## as to allow for deinstall/reinstall during automation
+##
+## Observe that bmdo() w/ill exit on event of build failure -
+## thus preventing rebuild of an "Incomplete" platform package
+## repository, as below, furthermore allowing for immediate debug
+
+bld_all() {
+
+local FIRST="$1"
+shift
+
+## FIXME check FIRST onto SKIP
+FIRST
+while [ -n "$FIRST" ]; do
+	## NB "builder factory" may parallelize "builder" exec, pursuant of
+	## * multithreaded "script"; * deps graph priority&parallelization analysis
+	elmsg "Build ${FIRST}"
+	bld_one "${FIRST}"
+	emsg "Recompute ports to build"
+#	SKIPARG="-x \"${FIRST}\" ${SKIPARG}" ## FIXME HACK for bad portversion output
+        set $(chkupd $@) ## mutate list during batch build
+	FIRST="$1"
+	shift
+	if [ -n "$FIRST" ]; then
+	  lmsg "Remaining ports to build: ${FIRST} $@"
+	else
+	  elmsg "Done with ports build"
+	  break
+	fi
+done 
+}
+
+
+
+
+## -----
+
+## init log
+lmsg "Build begins: ${NOW}"
+
+## --
+
+emsg "Checking manually installed ports"
+MPKG=$(pkg query -e "%a = 0" "%n")
+lmsg "Checking manually installed ports: ${MPKG}" 
+
+XPORTS=""
+## support 'env SKIP="..." ...'
+#SKIP=""
+
+## FIXME Track across port migrations
+## e.g deleted+merge from x11-toolkits/qt5-declarative-render2d to {qt5-quick}
+
+if [ -n "${SKIP}" ]; then
+  elmsg "Skipping specified ports: ${SKIP}"
+fi
+
+NASKIP=""
+
+emsg "Checking for port origins - manually installed ports"
+for P in $MPKG; do
+## FIXME This does not compare P (pkgname) onto initial SKIP list
+	ORG=$(pkg info -o "${P}"  | awk '{print $2}')
+
+	if [ -d $(getpdir ${ORG}) ]; then
+	  XPORTS="${XPORTS} ${ORG}"
+	else
+	  NASKIP="${NASKIP} ${ORG}"
+	fi
+done
+
+if [ -n "${NASKIP}" ]; then
+  elmsg "Port origins not available - skipping ports: ${NASKIP}"
+fi
+
+if [ -n "${SKIP}" ]; then
+    SKIP="${SKIP} ${NASKIP}"
+  else
+    SKIP="${NASKIP}"
+fi
+
+SKIPARG=""
+for P in ${SKIP}; do ## FIXME unused
+## NB not clear if this effective for skipping deleted ports w/ portmaster
+## NB This arglist is used in portmaster and portversion calls
+	SKIPARG="-x \"${P}\" ${SKIPARG}"
+done
+
+
+## --
+
+emsg "Compute updated ports for configuration"
+BLDPORTS=$(chkupd ${XPORTS})
+lmsg "Configure ports ${BLDPORTS}"
+
+## Intermediate ports list
+BLDPORTS_IN="${BLDPORTS}"
+
+elmsg "Ensure ports configuration"
+for P in ${BLDPORTS_IN}; do
+## FIXME check P onto SKIP
+  bmdo "${P}" config-recursive
+done
+
+elmsg "Recompute ports for build"
+BLDPORTS_IN=$(chkupd ${BLDPORTS_IN})
+lmsg "Build ports ${BLDPORTS_IN}"
+
+elmsg "Retrieve port distfiles"
+for P in ${BLDPORTS_IN}; do
+## FIXME check P onto SKIP
+
+## FIXME some ports do not fetch during fetch-recursive e.g java/eclipse-cdt
+
+    bmdo "${P}" fetch-recursive
+done
+
+## NB Mutation of list objects in BASH
+
+elmsg "Do build"
+
+bld_all ${BLDPORTS_IN} && pkg repo ${PKG_REPO_ROOT}
+
+
+## FIXME note portmaster -s, 
+## "clean out stale ports that used to be depended on"
+## see also: pkg autoremove
